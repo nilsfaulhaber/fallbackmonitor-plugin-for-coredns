@@ -1,0 +1,7 @@
+membrain-it.technology:53 {
+    fallbackmonitor
+}
+.:53 {
+    log
+    whoami
+}
