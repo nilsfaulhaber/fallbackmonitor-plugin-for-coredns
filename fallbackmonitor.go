@@ -108,8 +108,9 @@ func assembleRR(data *queryData, protocol string) ([]dns.RR, error) {
 
 	csvFile.Close()
 
+	// 145 for 4KB responses, 72 for 2KB responses 
 	rrs := make([]dns.RR, 145)
-
+	// 145 for 4KB responses, 72 for 2KB responses
 	for a := 0; a < 145; a++ {
 	  base_str := fmt.Sprintf("%s IN AAAA 2003:ec:970e:f439:c5fd:30b8:2365:%x", data.Name, a)
 	  rr, err := dns.NewRR(base_str)
