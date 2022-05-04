@@ -88,7 +88,7 @@ if err := csvwriter.Error(); err != nil {
 }
 
 csvFile.Close()
-
+~~~
 Finally, a specific number of different AAAA records is generated and returned. 
 ~~~
 // 145 for 4KB responses, 72 for 2KB responses 
