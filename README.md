@@ -1,7 +1,7 @@
 # fallbackmonitor-plugin-for-coredns
 A CoreDNS plugin that returns large DNS responses, encodes received DNS queries and stores them in a local csv-file. The plugin was developed for research, to monitor the DoTCP fallback behavior of certain public DNS resolvers. The sender's IP address, the transport protocol (TCP/UDP) over that the request reached the name server and a timestamp are also stored. 
 
-# Funcionality explained
+# Functionality explained
 For general details, how to develop custom CoreDNS plugins, please refer to [this article](https://coredns.io/2016/12/19/writing-plugins-for-coredns/).
 
 ## Retrieving the Transport Protocol
