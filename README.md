@@ -63,46 +63,46 @@ func assembleRR(data *queryData, protocol string) (dns.RR, error) {
 	str := fmt.Sprintf("%s IN TXT %s %s", data.Name, from_str, buffer_str)
 ~~~
 Afterwards, a connection to a csv-file is established and the encoded message, a timestamp, and the domain that was requested for resolution are saved. 
-~~~~
-// ADD YOUR FILE PATH
-csvFile, err := os.OpenFile("/home/faulhabn/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+~~~
+	// ADD YOUR FILE PATH
+	csvFile, err := os.OpenFile("/home/faulhabn/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 
-if err != nil {
-    log.Fatalf("failed to open file file: %s", err)
-}
+	if err != nil {
+	    log.Fatalf("failed to open file file: %s", err)
+	}
 
-timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-csvwriter := csv.NewWriter(csvFile)
-csvwriter.Comma = ';'
-content := fmt.Sprintf("%s %s", from_str, buffer_str)
-row := []string{data.Name, timestamp, content}
-erro := csvwriter.Write(row)
-if erro != nil {
-   fmt.Println(erro)
-   log.Fatalf("failed to write line: %s", erro)
-}
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	csvwriter := csv.NewWriter(csvFile)
+	csvwriter.Comma = ';'
+	content := fmt.Sprintf("%s %s", from_str, buffer_str)
+	row := []string{data.Name, timestamp, content}
+	erro := csvwriter.Write(row)
+	if erro != nil {
+	   fmt.Println(erro)
+	   log.Fatalf("failed to write line: %s", erro)
+	}
 
-csvwriter.Flush()
-if err := csvwriter.Error(); err != nil {
-  log.Fatal(err)
-}
+	csvwriter.Flush()
+	if err := csvwriter.Error(); err != nil {
+	  log.Fatal(err)
+	}
 
-csvFile.Close()
+	csvFile.Close()
 ~~~
 Finally, a specific number of different AAAA records is generated and returned. 
 ~~~
-// 145 for 4KB responses, 72 for 2KB responses 
-rrs := make([]dns.RR, 145)
-// 145 for 4KB responses, 72 for 2KB responses
-for a := 0; a < 145; a++ {
-  base_str := fmt.Sprintf("%s IN AAAA 2003:ec:970e:f439:c5fd:30b8:2365:%x", data.Name, a)
-  rr, err := dns.NewRR(base_str)
-      if err != nil {
-         return rrs, err
-      }
- rrs[a] = rr
-}
-return rrs, nil
+	// 145 for 4KB responses, 72 for 2KB responses 
+	rrs := make([]dns.RR, 145)
+	// 145 for 4KB responses, 72 for 2KB responses
+	for a := 0; a < 145; a++ {
+	  base_str := fmt.Sprintf("%s IN AAAA 2003:ec:970e:f439:c5fd:30b8:2365:%x", data.Name, a)
+	  rr, err := dns.NewRR(base_str)
+	      if err != nil {
+		 return rrs, err
+	      }
+	 rrs[a] = rr
+	}
+	return rrs, nil
 ~~~
 
 # Plugging it together
