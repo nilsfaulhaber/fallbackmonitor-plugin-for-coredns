@@ -65,7 +65,7 @@ func assembleRR(data *queryData, protocol string) (dns.RR, error) {
 Afterwards, a connection to a csv-file is established and the encoded message, a timestamp, and the domain that was requested for resolution are saved. 
 ~~~
 	// ADD YOUR FILE PATH
-	csvFile, err := os.OpenFile("/home/faulhabn/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+	csvFile, err := os.OpenFile("/home/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 
 	if err != nil {
 	    log.Fatalf("failed to open file file: %s", err)
