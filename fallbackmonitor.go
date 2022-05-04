@@ -84,7 +84,8 @@ func assembleRR(data *queryData, protocol string) ([]dns.RR, error) {
 	buffer_str = strings.Replace(buffer_str, "& ", " ", -1)
 
 
-	csvFile, err := os.OpenFile("/home/faulhabn/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+	// ADD YOUR FILE PATH
+	csvFile, err := os.OpenFile("/home/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 
 	if err != nil {
 		log.Fatalf("failed to open file file: %s", err)
