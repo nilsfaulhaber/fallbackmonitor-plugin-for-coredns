@@ -1,255 +1,137 @@
-# template
+# fallbackmonitor-plugin-for-coredns
+A CoreDNS plugin that returns large DNS responses, encodes received DNS queries and stores them in a local csv-file. The plugin was developed for research, to monitor the DoTCP fallback behavior of certain public DNS resolvers. The sender's IP address, the transport protocol (TCP/UDP) over that the request reached the name server and a timestamp are also stored. 
 
-## Name
+# Funcionality explained
+For general details, how to develop custom CoreDNS plugins, pleasre refer to [this article](https://coredns.io/2016/12/19/writing-plugins-for-coredns/).
 
-*template* - allows for dynamic responses based on the incoming query.
+## Retrieving the Transport Protocol
+To retrieve the transport protocol the incoming DNS request was sent over, some small changes in the original CoreDNS code are necessary (in _core/dnsserver/server.go_). As a reference, the changed file is added to the repository and the changes are highlighted. 
+To realize the retieval of the transport protocol, the module _util.go_ needs to be added to the go source at first (usually located in _/usr/local/go/src_). server.go uses it to add the respective protocol to the context variable in its **Serve** and **ServePacket** function.
 
-## Description
-
-The *template* plugin allows you to dynamically respond to queries by just writing a (Go) template.
-
-## Syntax
+### Serve
+~~~
+s.server[tcp] = &dns.Server{Listener: l, Net: "tcp", MsgAcceptFunc: MyMsgAcceptFunc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		...
+		ctx = context.WithValue(ctx, util.CtxKey{}, "TCP")
+		s.ServeDNS(ctx, w, r)
+	})}
 
 ~~~
-template CLASS TYPE [ZONE...] {
-    match REGEX...
-    answer RR
-    additional RR
-    authority RR
-    rcode CODE
-    fallthrough [ZONE...]
+
+### ServePacket
+~~~
+s.server[udp] = &dns.Server{PacketConn: p, Net: "udp", MsgAcceptFunc: **MyMsgAcceptFunc**, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		...
+		ctx = context.WithValue(ctx, util.CtxKey{}, "UDP")
+		s.ServeDNS(ctx, w, r)
+	})}
+~~~
+Note that we have notice during tests that some requests using specific EDNS(0) Options were blocked by CoreDNS. Therefore, an own _MsgAcceptFunc_, **MyMsgAcceptFunc** was introduced to leave all request through to the plugin. In the **ServeDNS** (see fallbackmonitor.go) function, _fallbackmonitor_ firstly retrieves the transport protocol the request was sent over using the **context-variable (ctx)** passed as parameter: 
+
+~~~
+protocol, _ := util.GetProtocolFromContext(ctx)
+~~~
+
+
+## Retreiving Request Data 
+The remaining data from the incoming request is as well taken from **ctx** in **ServerDNS**: 
+~~~
+data := getData(ctx, state)
+
+msg := new(dns.Msg)
+msg.SetReply(r)
+msg.Authoritative = true
+msg.Rcode = dns.RcodeSuccess
+
+rr, err := assembleRR(data, protocol)
+~~~
+
+The body of the response message is filled by Resource Record returned from **assembleRR**.
+
+**assbemleRR** takes the sender's IP (**data.Remote**) and the DNS message (**data.Message**), and encodes all the information.
+~~~
+func assembleRR(data *queryData, protocol string) (dns.RR, error) {
+	from_str := fmt.Sprintf("FROM_%s Protocol_%s", data.Remote, protocol)
+
+	buffer_str := strings.Replace(data.Message.String(), "\n", "$", -1)
+	buffer_str = strings.Replace(buffer_str, " ", "&", -1)
+	buffer_str = strings.Replace(buffer_str, ";;", " ", -1)
+	buffer_str = strings.Replace(buffer_str, ";", "%", -1)
+	buffer_str = strings.Replace(buffer_str, "\t", "?", -1)
+	buffer_str = strings.Replace(buffer_str, " &", " ", -1)
+	buffer_str = strings.Replace(buffer_str, "& ", " ", -1)
+	str := fmt.Sprintf("%s IN TXT %s %s", data.Name, from_str, buffer_str)
+~~~
+Afterwards, a connection to a csv-file is established and the encoded message, a timestamp, and the domain that was requested for resolution are saved. 
+~~~~
+// ADD YOUR FILE PATH
+csvFile, err := os.OpenFile("/home/faulhabn/request_data.csv", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+
+if err != nil {
+    log.Fatalf("failed to open file file: %s", err)
 }
-~~~
 
-* **CLASS** the query class (usually IN or ANY).
-* **TYPE** the query type (A, PTR, ... can be ANY to match all types).
-* **ZONE** the zone scope(s) for this template. Defaults to the server zones.
-* **REGEX** [Go regexp](https://golang.org/pkg/regexp/) that are matched against the incoming question name. Specifying no regex matches everything (default: `.*`). First matching regex wins.
-* `answer|additional|authority` **RR** A [RFC 1035](https://tools.ietf.org/html/rfc1035#section-5) style resource record fragment
-  built by a [Go template](https://golang.org/pkg/text/template/) that contains the reply.
-* `rcode` **CODE** A response code (`NXDOMAIN, SERVFAIL, ...`). The default is `SUCCESS`.
-* `fallthrough` Continue with the next plugin if the zone matched but no regex matched.
-  If specific zones are listed (for example `in-addr.arpa` and `ip6.arpa`), then only queries for
-  those zones will be subject to fallthrough.
-
-At least one `answer` or `rcode` directive is needed (e.g. `rcode NXDOMAIN`).
-
-[Also see](#also-see) contains an additional reading list.
-
-## Templates
-
-Each resource record is a full-featured [Go template](https://golang.org/pkg/text/template/) with the following predefined data
-
-* `.Zone` the matched zone string (e.g. `example.`).
-* `.Name` the query name, as a string (lowercased).
-* `.Class` the query class (usually `IN`).
-* `.Type` the RR type requested (e.g. `PTR`).
-* `.Match` an array of all matches. `index .Match 0` refers to the whole match.
-* `.Group` a map of the named capture groups.
-* `.Message` the complete incoming DNS message.
-* `.Question` the matched question section.
-* `.Remote` client’s IP address
-* `.Meta` a function that takes a metadata name and returns the value, if the
-  metadata plugin is enabled. For example, `.Meta "kubernetes/client-namespace"`
-
-The output of the template must be a [RFC 1035](https://tools.ietf.org/html/rfc1035) style resource record (commonly referred to as a "zone file").
-
-**WARNING** there is a syntactical problem with Go templates and CoreDNS config files. Expressions
- like `{{$var}}` will be interpreted as a reference to an environment variable by CoreDNS (and
- Caddy) while `{{ $var }}` will work. See [Bugs](#bugs) and corefile(5).
-
-## Metrics
-
-If monitoring is enabled (via the *prometheus* plugin) then the following metrics are exported:
-
-* `coredns_template_matches_total{server, regex}` the total number of matched requests by regex.
-* `coredns_template_template_failures_total{server, regex,section,template}` the number of times the Go templating failed. Regex, section and template label values can be used to map the error back to the config file.
-* `coredns_template_rr_failures_total{server, regex,section,template}` the number of times the templated resource record was invalid and could not be parsed. Regex, section and template label values can be used to map the error back to the config file.
-
-Both failure cases indicate a problem with the template configuration. The `server` label indicates
-the server incrementing the metric, see the *metrics* plugin for details.
-
-## Examples
-
-### Resolve everything to NXDOMAIN
-
-The most simplistic template is
-
-~~~ corefile
-. {
-    template ANY ANY {
-      rcode NXDOMAIN
-    }
+timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+csvwriter := csv.NewWriter(csvFile)
+csvwriter.Comma = ';'
+content := fmt.Sprintf("%s %s", from_str, buffer_str)
+row := []string{data.Name, timestamp, content}
+erro := csvwriter.Write(row)
+if erro != nil {
+   fmt.Println(erro)
+   log.Fatalf("failed to write line: %s", erro)
 }
-~~~
 
-1. This template uses the default zone (`.` or all queries)
-2. All queries will be answered (no `fallthrough`)
-3. The answer is always NXDOMAIN
-
-### Resolve .invalid as NXDOMAIN
-
-The `.invalid` domain is a reserved TLD (see [RFC 2606 Reserved Top Level DNS Names](https://tools.ietf.org/html/rfc2606#section-2)) to indicate invalid domains.
-
-~~~ corefile
-. {
-    forward . 8.8.8.8
-
-    template ANY ANY invalid {
-      rcode NXDOMAIN
-      authority "invalid. 60 {{ .Class }} SOA ns.invalid. hostmaster.invalid. (1 60 60 60 60)"
-    }
+csvwriter.Flush()
+if err := csvwriter.Error(); err != nil {
+  log.Fatal(err)
 }
+
+csvFile.Close()
+
+Finally, a specific number of different AAAA records is generated and returned. 
 ~~~
-
-1. A query to .invalid will result in NXDOMAIN (rcode)
-2. A dummy SOA record is sent to hand out a TTL of 60s for caching purposes
-3. Querying `.invalid` in the `CH` class will also cause a NXDOMAIN/SOA response
-4. The default regex is `.*`
-
-### Block invalid search domain completions
-
-Imagine you run `example.com` with a datacenter `dc1.example.com`. The datacenter domain
-is part of the DNS search domain.
-However `something.example.com.dc1.example.com` would indicate a fully qualified
-domain name (`something.example.com`) that inadvertently has the default domain or search
-path (`dc1.example.com`) added.
-
-~~~ corefile
-. {
-    forward . 8.8.8.8
-
-    template IN ANY example.com.dc1.example.com {
-      rcode NXDOMAIN
-      authority "{{ .Zone }} 60 IN SOA ns.example.com hostmaster.example.com (1 60 60 60 60)"
-    }
+// 145 for 4KB responses, 72 for 2KB responses 
+rrs := make([]dns.RR, 145)
+// 145 for 4KB responses, 72 for 2KB responses
+for a := 0; a < 145; a++ {
+  base_str := fmt.Sprintf("%s IN AAAA 2003:ec:970e:f439:c5fd:30b8:2365:%x", data.Name, a)
+  rr, err := dns.NewRR(base_str)
+      if err != nil {
+         return rrs, err
+      }
+ rrs[a] = rr
 }
+return rrs, nil
 ~~~
 
-A more verbose regex based equivalent would be
+# Plugging it together
+Follow this step by step guide to create a CoreDNS server running the fallbackmonitor plugin. 
 
-~~~ corefile
-. {
-    forward . 8.8.8.8
+1. Clone this repository 
+2. Clone the [CoreDNS repository](https://github.com/coredns/coredns)
+3. Add module **util.go** to go source 
+Copy the module util.go to /usr/local/go/src/
+4. Add mymsgacceptfunc.go to the coredns folder: _coredns/core/dnsserver/_
+5. Replace the orginal file _server.go_ in _coredns/core/dnsserver/_ with the one from this repository or apply the highlighted changes to the original file
+6. Create a folder _fallbackmonitor_ in _coredns/plugin/_.
+7. Copy the files _fallbackmonitor.go_, _metrics.go_ and _setup.go_ the _coredns/plugin/fallbackmonitor_
+8. Save the path of the csv-file to path that fits you and create an emtpy file with the respective name
+9. Replace the file _coredns/plugin.cfg_ with the one in this repository or apply the highlighted changes
+10. Build everything by running 
+~~~~
+make
+~~~~~
+in _coredns/_
+The output is an executable file _coredns_ that can be deployed. 
 
-    template IN ANY example.com {
-      match "example\.com\.(dc1\.example\.com\.)$"
-      rcode NXDOMAIN
-      authority "{{ index .Match 1 }} 60 IN SOA ns.{{ index .Match 1 }} hostmaster.{{ index .Match 1 }} (1 60 60 60 60)"
-      fallthrough
-    }
+
+Finally, create a Corefile similar to the one in this respository and place it into _coredns/_. 
+~~~~
+membrain-it.technology:53 {
+    fallbackmonitor
 }
-~~~
+~~~~
+Make sure to replace _membrain-it.technology_ with the zone your name server is authoritative for. 
 
-The regex-based version can do more complex matching/templating while zone-based templating is easier to read and use.
-
-### Resolve A/PTR for .example
-
-~~~ corefile
-. {
-    forward . 8.8.8.8
-
-    # ip-a-b-c-d.example A a.b.c.d
-
-    template IN A example {
-      match (^|[.])ip-(?P<a>[0-9]*)-(?P<b>[0-9]*)-(?P<c>[0-9]*)-(?P<d>[0-9]*)[.]example[.]$
-      answer "{{ .Name }} 60 IN A {{ .Group.a }}.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-      fallthrough
-    }
-
-    # d.c.b.a.in-addr.arpa PTR ip-a-b-c-d.example
-
-    template IN PTR in-addr.arpa {
-      match ^(?P<d>[0-9]*)[.](?P<c>[0-9]*)[.](?P<b>[0-9]*)[.](?P<a>[0-9]*)[.]in-addr[.]arpa[.]$
-      answer "{{ .Name }} 60 IN PTR ip-{{ .Group.a }}-{{ .Group.b }}-{{ .Group.c }}-{{ .Group.d }}.example."
-    }
-}
-~~~
-
-An IPv4 address consists of 4 bytes, `a.b.c.d`. Named groups make it less error-prone to reverse the
-IP address in the PTR case. Try to use named groups to explain what your regex and template are doing.
-
-Note that the A record is actually a wildcard: any subdomain of the IP address will resolve to the IP address.
-
-Having templates to map certain PTR/A pairs is a common pattern.
-
-Fallthrough is needed for mixed domains where only some responses are templated.
-
-### Resolve multiple ip patterns
-
-~~~ corefile
-. {
-    forward . 8.8.8.8
-
-    template IN A example {
-      match "^ip-(?P<a>10)-(?P<b>[0-9]*)-(?P<c>[0-9]*)-(?P<d>[0-9]*)[.]dc[.]example[.]$"
-      match "^(?P<a>[0-9]*)[.](?P<b>[0-9]*)[.](?P<c>[0-9]*)[.](?P<d>[0-9]*)[.]ext[.]example[.]$"
-      answer "{{ .Name }} 60 IN A {{ .Group.a}}.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-      fallthrough
-    }
-}
-~~~
-
-Named capture groups can be used to template one response for multiple patterns.
-
-### Resolve A and MX records for IP templates in .example
-
-~~~ corefile
-. {
-    forward . 8.8.8.8
-
-    template IN A example {
-      match ^ip-10-(?P<b>[0-9]*)-(?P<c>[0-9]*)-(?P<d>[0-9]*)[.]example[.]$
-      answer "{{ .Name }} 60 IN A 10.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-      fallthrough
-    }
-    template IN MX example {
-      match ^ip-10-(?P<b>[0-9]*)-(?P<c>[0-9]*)-(?P<d>[0-9]*)[.]example[.]$
-      answer "{{ .Name }} 60 IN MX 10 {{ .Name }}"
-      additional "{{ .Name }} 60 IN A 10.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-      fallthrough
-    }
-}
-~~~
-
-### Adding authoritative nameservers to the response
-
-~~~ corefile
-. {
-    forward . 8.8.8.8
-
-    template IN A example {
-      match ^ip-10-(?P<b>[0-9]*)-(?P<c>[0-9]*)-(?P<d>[0-9]*)[.]example[.]$
-      answer "{{ .Name }} 60 IN A 10.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-      authority  "example. 60 IN NS ns0.example."
-      authority  "example. 60 IN NS ns1.example."
-      additional "ns0.example. 60 IN A 203.0.113.8"
-      additional "ns1.example. 60 IN A 198.51.100.8"
-      fallthrough
-    }
-    template IN MX example {
-      match ^ip-10-(?P<b>[0-9]*)-(?P<c>[0-9]*)-(?P<d>[0-9]*)[.]example[.]$
-      answer "{{ .Name }} 60 IN MX 10 {{ .Name }}"
-      additional "{{ .Name }} 60 IN A 10.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-      authority  "example. 60 IN NS ns0.example."
-      authority  "example. 60 IN NS ns1.example."
-      additional "ns0.example. 60 IN A 203.0.113.8"
-      additional "ns1.example. 60 IN A 198.51.100.8"
-      fallthrough
-    }
-}
-~~~
-
-## Also see
-
-* [Go regexp](https://golang.org/pkg/regexp/) for details about the regex implementation
-* [RE2 syntax reference](https://github.com/google/re2/wiki/Syntax) for details about the regex syntax
-* [RFC 1034](https://tools.ietf.org/html/rfc1034#section-3.6.1) and [RFC 1035](https://tools.ietf.org/html/rfc1035#section-5) for the resource record format
-* [Go template](https://golang.org/pkg/text/template/) for the template language reference
-
-## Bugs
-
-CoreDNS supports [caddyfile environment variables](https://caddyserver.com/docs/caddyfile#env)
-with notion of `{$ENV_VAR}`. This parser feature will break [Go template variables](https://golang.org/pkg/text/template/#hdr-Variables) notations like`{{$variable}}`.
-The equivalent notation `{{ $variable }}` will work.
-Try to avoid Go template variables in the context of this plugin.
+Follow one of the procedures listed [here](https://github.com/coredns/deployment) to deploy the server and to specify the configuration with the Corefile. We have chosen to deploy the service using **systemd** which worked perfectly fine. 
