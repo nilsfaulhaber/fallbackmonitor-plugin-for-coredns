@@ -118,11 +118,10 @@ Copy the module util.go to /usr/local/go/src/
 7. Copy the files _fallbackmonitor.go_, _metrics.go_ and _setup.go_ the _coredns/plugin/fallbackmonitor_
 8. Save the path of the csv-file to path that fits you and create an emtpy file with the respective name
 9. Replace the file _coredns/plugin.cfg_ with the one in this repository or apply the highlighted changes
-10. Build everything by running 
+10. To build, in in _coredns/_, run 
 ~~~~
 make
 ~~~~~
-in _coredns/_
 The output is an executable file _coredns_ that can be deployed. 
 
 
