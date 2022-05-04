@@ -2,11 +2,11 @@
 A CoreDNS plugin that returns large DNS responses, encodes received DNS queries and stores them in a local csv-file. The plugin was developed for research, to monitor the DoTCP fallback behavior of certain public DNS resolvers. The sender's IP address, the transport protocol (TCP/UDP) over that the request reached the name server and a timestamp are also stored. 
 
 # Funcionality explained
-For general details, how to develop custom CoreDNS plugins, pleasre refer to [this article](https://coredns.io/2016/12/19/writing-plugins-for-coredns/).
+For general details, how to develop custom CoreDNS plugins, please refer to [this article](https://coredns.io/2016/12/19/writing-plugins-for-coredns/).
 
 ## Retrieving the Transport Protocol
-To retrieve the transport protocol the incoming DNS request was sent over, some small changes in the original CoreDNS code are necessary (in _core/dnsserver/server.go_). As a reference, the changed file is added to the repository and the changes are highlighted. 
-To realize the retieval of the transport protocol, the module _util.go_ needs to be added to the go source at first (usually located in _/usr/local/go/src_). server.go uses it to add the respective protocol to the context variable in its **Serve** and **ServePacket** function.
+To retrieve the transport protocol the incoming DNS request was sent over, some small changes in the original CoreDNS code are necessary (in _core/dnsserver/server.go_). As a reference, the changed file was added to the repository and the changes are highlighted. 
+To realize the retrieval of the transport protocol, the module _util.go_ needs to be added to the go source at first (usually located in _/usr/local/go/src_). server.go uses it to add the respective protocol to the context variable in its **Serve** and **ServePacket** function.
 
 ### Serve
 ~~~
@@ -26,7 +26,7 @@ s.server[udp] = &dns.Server{PacketConn: p, Net: "udp", MsgAcceptFunc: **MyMsgAcc
 		s.ServeDNS(ctx, w, r)
 	})}
 ~~~
-Note that we have notice during tests that some requests using specific EDNS(0) Options were blocked by CoreDNS. Therefore, an own _MsgAcceptFunc_, **MyMsgAcceptFunc** was introduced to leave all request through to the plugin. In the **ServeDNS** (see fallbackmonitor.go) function, _fallbackmonitor_ firstly retrieves the transport protocol the request was sent over using the **context-variable (ctx)** passed as parameter: 
+Note that we have noticed during tests that some requests using specific EDNS(0) Options were blocked by CoreDNS. Therefore, an own _MsgAcceptFunc_, **MyMsgAcceptFunc** was introduced to leave all request through to the plugin. In the **ServeDNS** (see fallbackmonitor.go) function, _fallbackmonitor_ firstly retrieves the transport protocol the request was sent over using the **context-variable (ctx)** passed as parameter: 
 
 ~~~
 protocol, _ := util.GetProtocolFromContext(ctx)
@@ -34,7 +34,7 @@ protocol, _ := util.GetProtocolFromContext(ctx)
 
 
 ## Retreiving Request Data 
-The remaining data from the incoming request is as well taken from **ctx** in **ServerDNS**: 
+The remaining data from the incoming request is as well taken from **ctx** in **ServeDNS**: 
 ~~~
 data := getData(ctx, state)
 
@@ -46,7 +46,7 @@ msg.Rcode = dns.RcodeSuccess
 rr, err := assembleRR(data, protocol)
 ~~~
 
-The body of the response message is filled by Resource Record returned from **assembleRR**.
+The body of the response message is filled by AAAA records returned from **assembleRR**.
 
 **assbemleRR** takes the sender's IP (**data.Remote**) and the DNS message (**data.Message**), and encodes all the information.
 ~~~
