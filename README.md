@@ -46,7 +46,7 @@ msg.Rcode = dns.RcodeSuccess
 rr, err := assembleRR(data, protocol)
 ~~~
 
-The body of the response message is filled by AAAA records returned from **assembleRR**.
+The body of the response message is filled with AAAA records returned from **assembleRR**.
 
 **assbemleRR** takes the sender's IP (**data.Remote**) and the DNS message (**data.Message**), and encodes all the information.
 ~~~
